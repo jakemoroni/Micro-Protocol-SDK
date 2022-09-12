@@ -1,0 +1,5 @@
+build/
+application.bin
+application.elf
+application.update
+genimage
