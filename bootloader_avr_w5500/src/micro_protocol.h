@@ -198,7 +198,9 @@ union mp_msg {
 
 			/* MP_MSG_TYPE_IDENTIFY_NOTICE */
 			struct {
-				/* -1 if auto generated, or the seq nr of the QUERY if not. */
+				/* Broadcasted IDENTIFY_NOTICE messages maintain their own sequence number.
+				 * Responses due to a QUERY will have the sequence number of the query.
+				 */
 				uint8_t sequence_nr;
 				uint8_t platform_type;
 				uint8_t system_type;

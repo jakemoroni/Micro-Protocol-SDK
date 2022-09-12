@@ -12,7 +12,6 @@ BUILD_DIR	:= ./build
 SRC_DIR		:= ./src
 
 # Necessary for building a free standing bootloader.
-#BLFLAGS		:= -nostartfiles -nodefaultlibs -nostdlib -ffreestanding
 BLFLAGS		:= -nostdlib -ffreestanding -lgcc
 
 CFLAGS		:= -mmcu=$(MCU)

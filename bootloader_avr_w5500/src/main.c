@@ -9,6 +9,7 @@
  */
 
 #include <stdint.h> /* This can be used without the standard library. */
+#include <avr/wdt.h>
 #include "platform.h"
 #include "spi.h"
 #include "w5500.h"
@@ -20,8 +21,25 @@
 #define FW_VER_MAJOR                   1
 #define FW_VER_MINOR                   0
 
-#define BOOT_TIMEOUT_SECONDS           5 /* It takes ~3 seconds for the link to come up. */
+#define BOOT_TIMEOUT_SECONDS_DFLT      5 /* It takes ~3 seconds for the link to come up. */
 #define FIRMWARE_IMAGE_SIZE            28672u /* 32 KiB - 4 KiB bootlodaer */
+
+/* If these values are found at address 0x100 in SRAM, then
+ * it indicates that the next byte contains a reset command/cause.
+ * These values are optionally set by the application before allowing
+ * the WDT to reset the device. This works because the AVR preserves
+ * the SRAM contents on a WDT reset.
+ */
+#define RESET_MAGIC_SRAM_BASE          0x100
+#define RESET_MAGIC_SIZE               8u
+#define RESET_MAGIC_BYTES              { 0xD5, 0xF8, 0x31, 0x8C, 0xBB, 0xDD, 0xF6, 0xF7 }
+
+/* Command to cause the bootloader to wait an extra 30 seconds for an
+ * update request. This is used in cases where the application knows
+ * that the Ethernet link may not be available immediately after
+ * power up for some reason.
+ */
+#define RESET_COMMAND_WAIT_FOR_UPD     0x01
 
 typedef void (*firmware_entry)(void);
 
@@ -38,6 +56,7 @@ extern unsigned int *__BOOTLOADER_SIZE__; /* Maximum bootloader size. */
 
 /* Internal Micro Protocol system context. */
 struct mp_system_context {
+	uint8_t boot_timeout_seconds;
 	uint8_t mac[ETHERNET_MAC_LEN];
 	union mp_msg tx_ident_notice_msg;
 	uint8_t tx_ident_notice_msg_seq_nr;
@@ -99,13 +118,27 @@ static void init_bss(void)
 }
 
 /* Simple memcpy since there's no libc. */
-static void bl_memcpy(uint8_t *dst, uint8_t *src, size_t n)
+static void bl_memcpy(uint8_t *dst, const uint8_t *src, size_t n)
 {
 	size_t i;
 
 	for (i = 0; i < n; i++) {
 		dst[i] = src[i];
 	}
+}
+
+/* Simple memcmp. Returns true if any byte is different. */
+static bool bl_memcmp(const uint8_t *a, const uint8_t *b, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++) {
+		if (a[i] != b[i]) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /* Recalculate the CRC-32 for another byte. */
@@ -228,11 +261,9 @@ static bool mp_fsm_message_process(struct mp_system_context *inst,
 		return false;
 	}
 
-	for (i = 0; i < ETHERNET_MAC_LEN; i++) {
-		if (rx_msg->packet.header.dst_mac[i] != inst->mac[i]) {
-			/* Not for us. */
-			return false;
-		}
+	if (bl_memcmp(rx_msg->packet.header.dst_mac, inst->mac, ETHERNET_MAC_LEN)) {
+		/* Not for us. */
+		return false;
 	}
 
 	if (inst->state == MP_SYSTEM_STATE_READY_FOR_UPDATE_BEGIN) {
@@ -268,11 +299,9 @@ static bool mp_fsm_message_process(struct mp_system_context *inst,
 			return false;
 		}
 
-		for (i = 0; i < ETHERNET_MAC_LEN; i++) {
-			if (rx_msg->packet.header.src_mac[i] != inst->transfer.upgrader_host_mac[i]) {
-				/* Not from our upgrade host. */
-				return false;
-			}
+		if (bl_memcmp(rx_msg->packet.header.src_mac, inst->transfer.upgrader_host_mac, ETHERNET_MAC_LEN)) {
+			/* Not from our upgrade host. */
+			return false;
 		}
 
 		if (rx_msg->packet.payload.transfer.sequence_nr == (inst->transfer.upgrade_transfer_seq_num - 1u)) {
@@ -398,13 +427,20 @@ static void mp_fsm_run(struct mp_system_context *inst, struct w5500_device *eth)
 		 * Either way, go back to the initial state.
 		 */
 		inst->state = MP_SYSTEM_STATE_READY_FOR_UPDATE_BEGIN;
-		inst->boot_timeout = BOOT_TIMEOUT_SECONDS;
+		inst->boot_timeout = BOOT_TIMEOUT_SECONDS_DFLT;
 	}
 }
 
 /* Initializes the main FSM. */
-static void mp_fsm_init(struct mp_system_context *inst)
+static void mp_fsm_init(struct mp_system_context *inst, bool extend_boot_timeout)
 {
+	uint16_t random_delay;
+
+	inst->boot_timeout_seconds = BOOT_TIMEOUT_SECONDS_DFLT;
+	if (extend_boot_timeout) {
+		inst->boot_timeout_seconds += 30u;
+	}
+
 	platform_get_mac(inst->mac);
 	if (inst->mac[0] & 0x01) {
 		/* Invalid MAC. Can't have the multicsat bit set, so it's
@@ -419,9 +455,20 @@ static void mp_fsm_init(struct mp_system_context *inst)
 		inst->mac[5] = 0x03;
 	}
 
+	/* Apply a random delay in the range of 0 to 255 milliseconds based on
+	 * the MAC address. This will prevent a bunch of units from all sending
+	 * their IDENTIFY_NOTICE messages to the network at the exact same time
+	 * upon power up.
+	 */
+	random_delay = inst->mac[3];
+	random_delay += inst->mac[4];
+	random_delay += inst->mac[5];
+
+	platform_mdelay(random_delay & 0xFF);
+
 	/* Initial state. */
 	inst->state = MP_SYSTEM_STATE_READY_FOR_UPDATE_BEGIN;
-	inst->boot_timeout = BOOT_TIMEOUT_SECONDS;
+	inst->boot_timeout = inst->boot_timeout_seconds;
 
 	/* Identify notice message. */
 	inst->tx_ident_notice_msg_seq_nr = 0;
@@ -449,11 +496,37 @@ void main(void)
 	struct spi_device w5500_spi_dev;
 	struct w5500_device w5500_dev;
 	struct mp_system_context mp_ctx;
+	uint8_t *sram_base = (uint8_t *)RESET_MAGIC_SRAM_BASE;
+	uint8_t pre_init_sram_values[RESET_MAGIC_SIZE + 1u];
+	const uint8_t reset_magic_bytes[RESET_MAGIC_SIZE] = RESET_MAGIC_BYTES;
+	bool extend_boot_timeout = false;
+	uint8_t i;
+
+	/* Disable watchdog in case that was the cause of the reset. */
+	MCUSR = 0;
+	wdt_disable();
+
+	/* Store reset magic values before initializing the data and BSS sections. */
+	for (i = 0; i < sizeof(pre_init_sram_values); i++) {
+		pre_init_sram_values[i] = sram_base[i];
+		sram_base[i] = 0; /* Clear value. Reset commands are one time use. */
+	}
 
 	/* CRT setup. */
+	__sync_synchronize();
 	init_data();
 	init_bss();
 	__sync_synchronize();
+
+	/* Check to see if a reset cause/command was provided by the application.
+	 * This is done after the data section is initialized because reset_magic_bytes
+	 * is initialized with values from the data section...
+	 */
+	if (!bl_memcmp(pre_init_sram_values, reset_magic_bytes, RESET_MAGIC_SIZE)) {
+		if (pre_init_sram_values[RESET_MAGIC_SIZE] == RESET_COMMAND_WAIT_FOR_UPD) {
+			extend_boot_timeout = true;
+		}
+	}
 
 	/* Init timer core. */
 	timer_init();
@@ -486,7 +559,7 @@ void main(void)
 		}
 	}
 
-	mp_fsm_init(&mp_ctx);
+	mp_fsm_init(&mp_ctx, extend_boot_timeout);
 
 	while (1) {
 		/* The MP FSM will jump to the main application. */

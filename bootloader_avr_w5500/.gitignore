@@ -2,3 +2,4 @@ build/
 bootloader.elf
 bootloader.hex
 HWADDR_EEPROM.hex
+HWADDR.txt
