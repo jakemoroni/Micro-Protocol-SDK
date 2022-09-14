@@ -153,6 +153,7 @@ enum mp_system_state {
 enum mp_platform_type {
 	MP_PLATFORM_TYPE_INVALID,
 	MP_PLATFORM_TYPE_UNO_W5500,
+	MP_PLATFORM_TYPE_MEGA_W5500,
 };
 
 /* System type (for IDENTIFY_NOTICE). Informational purposes only. */

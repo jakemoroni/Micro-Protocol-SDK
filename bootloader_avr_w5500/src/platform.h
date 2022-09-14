@@ -16,11 +16,15 @@
 #include <avr/boot.h>
 #include <avr/pgmspace.h>
 
-/* The MAC is always stored at the end of the EEPROM.
- * No need for signature/CRC checking since it's programmed
- * by the external programmer and verified.
- */
-#define EEPROM_MAC_OFFSET              1018u
+#ifdef __AVR_ATmega2560__
+#define PLATFORM_PIN_DIG_13            PINB7
+#define PLATFORM_PIN_DIG_13_PORT       PORTB
+#define PLATFORM_PIN_DIG_13_DDR        DDRB
+#else
+#define PLATFORM_PIN_DIG_13            PINB5
+#define PLATFORM_PIN_DIG_13_PORT       PORTB
+#define PLATFORM_PIN_DIG_13_DDR        DDRB
+#endif
 
 /* Spins for a number of milliseconds. */
 static inline void platform_mdelay(uint32_t millis)

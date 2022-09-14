@@ -2,7 +2,47 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Makefile to build and flash the bootloader.
 
-MCU		:= atmega328p
+# Set TARGET to either TARGET_UNO or TARGET_MEGA.
+TARGET			:= TARGET_UNO
+#TARGET			:= TARGET_MEGA
+
+# Set to point to the avrdude binary. Enables use of newer binary if built manually.
+AVRDUDE_BINARY		:= avrdude
+#AVRDUDE_BINARY		:= /home/jmoroni/Programs/avrdude/bin/avrdude
+
+# Set to the type of programmer being used.
+
+# Sparkfun AVR pocket programmer
+AVRDUDE_PROGRAMMER	:= usbtiny
+
+# Pololu USB AVR programmer v2 (adjust ttyACMx as necessary)
+#AVRDUDE_PROGRAMMER	:= stk500v2 -P /dev/ttyACM1
+
+# Genuine Atmel ICE
+#AVRDUDE_PROGRAMMER	:= atmelice_isp
+
+ifeq ($(TARGET), TARGET_MEGA)
+	MCU			:= atmega2560
+	LDSCRIPT		:= bootloader_2560.ld
+
+	# The MAC is always stored at the end of EEPROM. No need for
+	# signature checking since it's written and verified by the
+	# external programmer.
+	EEPROM_MAC_OFFSET	:= 4090
+
+	# Firmware image size = total flash - bootloader size.
+	FIRMWARE_IMAGE_SIZE	:= 253952u
+	AVRDUDE_MCU		:= m2560
+	FUSE_VALUES		:= efuse:w:0xFD:m -U hfuse:w:0xD8:m -U lfuse:w:0xFF:m
+else
+	MCU			:= atmega328p
+	LDSCRIPT		:= bootloader_328p.ld
+	EEPROM_MAC_OFFSET	:= 1018
+	FIRMWARE_IMAGE_SIZE	:= 28672u
+	AVRDUDE_MCU		:= m328p
+	FUSE_VALUES		:= efuse:w:0xFD:m -U hfuse:w:0xD8:m -U lfuse:w:0xFF:m
+endif
+
 CROSS_COMPILE	:= avr-
 #CROSS_COMPILE	:= /home/jmoroni/Programs/avr_toolchain/bin/avr-
 # NOTE: Add -flto to BFLAGS when using newer toolchains otherwise
@@ -12,20 +52,21 @@ BUILD_DIR	:= ./build
 SRC_DIR		:= ./src
 
 # Necessary for building a free standing bootloader.
-BLFLAGS		:= -nostdlib -ffreestanding -lgcc
+BLFLAGS		:= -mmcu=$(MCU) -nostdlib -ffreestanding -lgcc
 
-CFLAGS		:= -mmcu=$(MCU)
-CFLAGS		+= -MMD -MP
+CFLAGS		:= -MMD -MP
 CFLAGS		+= -Wall
 CFLAGS		+= -Wstrict-prototypes
 CFLAGS		+= -Os
 CFLAGS		+= -fshort-enums
 CFLAGS		+= -ffunction-sections
 CFLAGS		+= -fdata-sections
+CFLAGS		+= -DEEPROM_MAC_OFFSET=$(EEPROM_MAC_OFFSET)
+CFLAGS		+= -DFIRMWARE_IMAGE_SIZE=$(FIRMWARE_IMAGE_SIZE)
 CFLAGS		+= $(BLFLAGS)
 
-LDFLAGS		:= -T$(SRC_DIR)/bootloader.ld
-LDFLAGS		+= -Wl,-gc-sections,--relax
+LDFLAGS		:= -T$(SRC_DIR)/$(LDSCRIPT)
+LDFLAGS		+= -Wl,-gc-sections,--relax -Wl,--defsym,app_entry=0x0
 LDFLAGS		+= $(BLFLAGS)
 
 ASM_SRCS	:= $(wildcard $(SRC_DIR)/*.S)
@@ -64,20 +105,25 @@ HWADDR.txt:
 # Convert the ASCII HWADDR file into a hex file that can be flashed to the EEPROM.
 HWADDR_EEPROM.hex: HWADDR.txt
 	@rm -f HWADDR_EEPROM.bin
-	@dd if=/dev/zero bs=1 count=1018 2>/dev/null | tr "\000" "\377" > HWADDR_EEPROM.bin
+	@dd if=/dev/zero bs=1 count=$(EEPROM_MAC_OFFSET) 2>/dev/null | tr "\000" "\377" > HWADDR_EEPROM.bin
 	@cat HWADDR.txt | xxd -r -p >> HWADDR_EEPROM.bin
 	@$(CROSS_COMPILE)objcopy -O ihex -I binary HWADDR_EEPROM.bin HWADDR_EEPROM.hex
 	@rm HWADDR_EEPROM.bin
 
-.PHONY: flash
-# There is a bug in avrdude that causes it to segfault after programming the EEPROM...
-flash: bootloader.hex HWADDR_EEPROM.hex
-	$(info Programming fuses...)
-	@avrdude -c usbtiny -p m328p -U efuse:w:0xFD:m -U hfuse:w:0xD8:m -U lfuse:w:0xFF:m
-	$(info Programming flash...)
-	@avrdude -c usbtiny -p m328p -U flash:w:bootloader.hex:i
+# Program just the EEPROM.
+# NOTE: There is a bug in avrdude that causes it to segfault after programming the EEPROM...
+.PHONY: program_eeprom
+program_eeprom: HWADDR_EEPROM.hex
 	$(info Programming EEPROM...)
-	-@avrdude -c usbtiny -p m328p -U eeprom:w:HWADDR_EEPROM.hex:i
+	-@$(AVRDUDE_BINARY) -c $(AVRDUDE_PROGRAMMER) -p $(AVRDUDE_MCU) -U eeprom:w:HWADDR_EEPROM.hex:i
+
+.PHONY: flash
+# Program the entire device, including the EEPROM.
+flash: bootloader.hex program_eeprom
+	$(info Programming fuses...)
+	@$(AVRDUDE_BINARY) -c $(AVRDUDE_PROGRAMMER) -p $(AVRDUDE_MCU) -U $(FUSE_VALUES)
+	$(info Programming flash...)
+	@$(AVRDUDE_BINARY) -c $(AVRDUDE_PROGRAMMER) -p $(AVRDUDE_MCU) -U flash:w:bootloader.hex:i
 
 .PHONY: clean
 clean:

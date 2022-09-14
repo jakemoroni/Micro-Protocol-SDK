@@ -22,15 +22,14 @@
 #define FW_VER_MINOR                   0
 
 #define BOOT_TIMEOUT_SECONDS_DFLT      5 /* It takes ~3 seconds for the link to come up. */
-#define FIRMWARE_IMAGE_SIZE            28672u /* 32 KiB - 4 KiB bootlodaer */
 
-/* If these values are found at address 0x100 in SRAM, then
+/* If these values are found at address 0x200 in SRAM, then
  * it indicates that the next byte contains a reset command/cause.
  * These values are optionally set by the application before allowing
  * the WDT to reset the device. This works because the AVR preserves
  * the SRAM contents on a WDT reset.
  */
-#define RESET_MAGIC_SRAM_BASE          0x100
+#define RESET_MAGIC_SRAM_BASE          0x200
 #define RESET_MAGIC_SIZE               8u
 #define RESET_MAGIC_BYTES              { 0xD5, 0xF8, 0x31, 0x8C, 0xBB, 0xDD, 0xF6, 0xF7 }
 
@@ -41,11 +40,13 @@
  */
 #define RESET_COMMAND_WAIT_FOR_UPD     0x01
 
-typedef void (*firmware_entry)(void);
+/* Main application image entry point. Provided to linker on command line. */
+extern void app_entry(void) __attribute__ ((noreturn));
 
 /* Symbols defined in the linker script. */
-extern unsigned int *__data_flash_start;  /* Data section start address in flash. */
-extern unsigned int *__data_flash_end;    /* Data section end address in flash. */
+extern unsigned int *__data_flash_start_hi;  /* Data section start address (upper) in flash. */
+extern unsigned int *__data_flash_start_lo;  /* Data section end address (lower) in flash. */
+extern unsigned int *__data_flash_size;      /* Data section length. */
 extern unsigned int *__data_sram_start;   /* Data section start address in SRAM. */
 extern unsigned int *__bss_sram_start;    /* BSS section start address in SRAM. */
 extern unsigned int *__bss_sram_end;      /* BSS section end address in SRAM. */
@@ -70,9 +71,17 @@ struct mp_system_context {
 		uint8_t upgrader_host_mac[ETHERNET_MAC_LEN];
 		uint8_t upgrade_transfer_seq_num;
 		uint16_t upgrade_timer_start;
+#ifdef __AVR_ATmega2560__
+		/* The bootloader is close to the max size for the 328p,
+		 * so reducing the size of these actually is required.
+		 */
+		uint32_t total_bytes_received;
+		uint32_t last_page_programmed_addr;
+#else
 		uint16_t total_bytes_received;
-		uint16_t page_bytes_received;
 		uint16_t last_page_programmed_addr;
+#endif
+		uint16_t page_bytes_received;
 		uint8_t page[FLASH_PAGE_SIZE];
 	} transfer;
 };
@@ -93,14 +102,19 @@ void *memset(void *str, int c, size_t n)
 /* Initialize the .data section SRAM contents. */
 static void init_data(void)
 {
-	const uintptr_t flash_start = (uintptr_t)&__data_flash_start;
-	const uintptr_t flash_end = (uintptr_t)&__data_flash_end;
-	const uintptr_t data_section_len = flash_end - flash_start;
+	const uintptr_t flash_start_hi = (uintptr_t)&__data_flash_start_hi;
+	const uintptr_t flash_start_lo = (uintptr_t)&__data_flash_start_lo;
+	const uintptr_t data_section_len = (uintptr_t)&__data_flash_size;
+	uint32_t flash_addr;
 	uint8_t *data_start = (uint8_t *)&__data_sram_start;
 	uintptr_t i;
 
+	flash_addr = flash_start_hi;
+	flash_addr <<= 16u;
+	flash_addr |= flash_start_lo;
+
 	for (i = 0; i < data_section_len; i++) {
-		data_start[i] = pgm_read_byte(flash_start + i);
+		data_start[i] = flash_read_byte(flash_addr + i);
 	}
 }
 
@@ -168,17 +182,17 @@ static bool check_firmware_crc(void)
 
 	calculated_crc = 0;
 	for (i = 0; i < FIRMWARE_IMAGE_SIZE - 4u; i++) {
-		calculated_crc = crc32_update_byte(calculated_crc, pgm_read_byte(i));
+		calculated_crc = crc32_update_byte(calculated_crc, flash_read_byte(i));
 	}
 
 	/* CRC is stored as big endian. */
-	stored_crc = pgm_read_byte(FIRMWARE_IMAGE_SIZE - 4u);
+	stored_crc = flash_read_byte(FIRMWARE_IMAGE_SIZE - 4u);
 	stored_crc <<= 8u;
-	stored_crc |= pgm_read_byte(FIRMWARE_IMAGE_SIZE - 3u);
+	stored_crc |= flash_read_byte(FIRMWARE_IMAGE_SIZE - 3u);
 	stored_crc <<= 8u;
-	stored_crc |= pgm_read_byte(FIRMWARE_IMAGE_SIZE - 2u);
+	stored_crc |= flash_read_byte(FIRMWARE_IMAGE_SIZE - 2u);
 	stored_crc <<= 8u;
-	stored_crc |= pgm_read_byte(FIRMWARE_IMAGE_SIZE - 1u);
+	stored_crc |= flash_read_byte(FIRMWARE_IMAGE_SIZE - 1u);
 
 	if (calculated_crc != stored_crc) {
 		return false;
@@ -283,11 +297,9 @@ static bool mp_fsm_message_process(struct mp_system_context *inst,
 		/* Update internal state. */
 		inst->state = MP_SYSTEM_STATE_UPDATE_IN_PROGRESS;
 
+		/* Init transfer context. */
+		memset(&inst->transfer, 0, sizeof(inst->transfer));
 		bl_memcpy(inst->transfer.upgrader_host_mac, rx_msg->packet.header.src_mac, ETHERNET_MAC_LEN);
-		inst->transfer.upgrade_transfer_seq_num = 0;
-		inst->transfer.total_bytes_received = 0;
-		inst->transfer.page_bytes_received = 0;
-		inst->transfer.last_page_programmed_addr = 0;
 
 		mp_send_transfer_begin_ack(inst, eth);
 
@@ -355,14 +367,14 @@ static void mp_fsm_run(struct mp_system_context *inst, struct w5500_device *eth)
 {
 	union mp_msg rx_msg;
 	uint16_t timer_val;
-	firmware_entry fw = (void *)0;
 	int tmp;
 
 	if (inst->state == MP_SYSTEM_STATE_READY_FOR_UPDATE_BEGIN) {
 		if (!inst->boot_timeout) {
 			/* Try to boot. */
 			if (check_firmware_crc()) {
-				fw();
+				app_entry();
+				/* NO RETURN */
 			} else {
 				/* The firmware image has a bad CRC. Just stay in the bootloader
 				 * forever and wait for an update.
@@ -482,7 +494,11 @@ static void mp_fsm_init(struct mp_system_context *inst, bool extend_boot_timeout
 	memset(&inst->tx_ident_notice_msg.packet.header.dst_mac, 0xFF, ETHERNET_MAC_LEN);
 
 	/* Payload. */
+#ifdef __AVR_ATmega2560__
+	inst->tx_ident_notice_msg.packet.payload.identify_notice.platform_type = MP_PLATFORM_TYPE_MEGA_W5500;
+#else
 	inst->tx_ident_notice_msg.packet.payload.identify_notice.platform_type = MP_PLATFORM_TYPE_UNO_W5500;
+#endif
 	inst->tx_ident_notice_msg.packet.payload.identify_notice.system_type = MP_SYSTEM_TYPE_GENERAL_PURPOSE;
 	inst->tx_ident_notice_msg.packet.payload.identify_notice.fw_ver_major = FW_VER_MAJOR;
 	inst->tx_ident_notice_msg.packet.payload.identify_notice.fw_ver_minor = FW_VER_MINOR;
@@ -546,15 +562,15 @@ void main(void)
 
 	if (w5500_init(&w5500_dev, &w5500_spi_dev)) {
 		/* Could not initialize the Ethernet device.
-		 * Toggle the LED on pin 13 (B5), which is also the SPI SCK and spin forever.
+		 * Toggle the LED on pin 13 and spin forever.
 		 */
 		spi_bus_exit();
-		DDRB |= (1u << PINB5);
+		PLATFORM_PIN_DIG_13_DDR |= (1u << PLATFORM_PIN_DIG_13);
 		while (1) {
 			/* ~1 Hz toggle. */
-			PORTB |= (1u << PINB5);
+			PLATFORM_PIN_DIG_13_PORT |= (1u << PLATFORM_PIN_DIG_13);
 			platform_mdelay(500);
-			PORTB &= ~(1u << PINB5);
+			PLATFORM_PIN_DIG_13_PORT &= ~(1u << PLATFORM_PIN_DIG_13);
 			platform_mdelay(500);
 		}
 	}

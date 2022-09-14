@@ -5,25 +5,25 @@
  */
 
 OUTPUT_FORMAT("elf32-avr")
-OUTPUT_ARCH(avr:5)
+OUTPUT_ARCH(avr:6)
 
-/* Specific to the ATmega328P. */
-__FLASH_SIZE__ = 0x8000;
-__SRAM_SIZE__ = 0x800;
+/* Specific to the ATmega2560. */
+__FLASH_SIZE__ = 0x40000;
+__SRAM_SIZE__ = 0x10000;
 
 /* Bootloader size must match fuse settings. */
-__BOOTLOADER_SIZE__ = 0x1000;
+__BOOTLOADER_SIZE__ = 0x2000;
 
 MEMORY {
 	/* The bootloader is located at the end of flash. */
 	FLASH_REGION (rx) : ORIGIN = (__FLASH_SIZE__ - __BOOTLOADER_SIZE__), LENGTH = __BOOTLOADER_SIZE__
 
 	/* Use 1/2 of the total SRAM for .data and .bss, leaving the other half for the stack.
-	 * The ATmega328P SRAM starts at 0x100, and GCC offsets all SRAM addresses by 0x800000
+	 * The ATmega2560 SRAM starts at 0x200, and GCC offsets all SRAM addresses by 0x800000
 	 * to deal with the Harvard architecture of the AVR. I think GCC also does a fixup for
 	 * this depending on the -mmcu argument, but we might as well set it correctly.
 	 */
-	SRAM_REGION (rw!x) : ORIGIN = 0x800100, LENGTH = (__SRAM_SIZE__ / 2)
+	SRAM_REGION (rw!x) : ORIGIN = 0x800200, LENGTH = (__SRAM_SIZE__ / 2)
 }
 
 SECTIONS {
@@ -52,8 +52,9 @@ SECTIONS {
 		. = ALIGN(2); /* Align for storage into word addressed flash. */
 	} > SRAM_REGION AT > FLASH_REGION
 
-	__data_flash_start = LOADADDR(.data);
-	__data_flash_end = __data_flash_start + SIZEOF(.data);
+	__data_flash_start_hi = LOADADDR(.data) / 0x10000;
+	__data_flash_start_lo = LOADADDR(.data) & 0xFFFF;
+	__data_flash_size = SIZEOF(.data);
 
 	.bss (NOLOAD) : {
 		__bss_sram_start = .;

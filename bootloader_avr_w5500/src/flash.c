@@ -6,7 +6,7 @@
 
 #include "flash.h"
 
-void flash_page_program(uint16_t addr, uint8_t *page_buf)
+void flash_page_program(uint32_t addr, uint8_t *page_buf)
 {
 	uint16_t i;
 	uint16_t le_word;

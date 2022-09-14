@@ -12,7 +12,13 @@
 
 #define FLASH_PAGE_SIZE                SPM_PAGESIZE
 
+#ifdef __AVR_ATmega2560__
+#define flash_read_byte                pgm_read_byte_far
+#else
+#define flash_read_byte                pgm_read_byte
+#endif
+
 /* Writes a page of data to flash. */
-void flash_page_program(uint16_t addr, uint8_t *page_buf);
+void flash_page_program(uint32_t addr, uint8_t *page_buf);
 
 #endif /* FLASH_H_ */
