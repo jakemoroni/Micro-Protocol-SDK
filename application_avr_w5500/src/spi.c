@@ -15,23 +15,32 @@
 #include <avr/io.h>
 #include "spi.h"
 
+#ifdef __AVR_ATmega2560__
 #define SPI_DDR                        DDRB
-#define CS                             PINB2
+#define DEVICE_CS0                     PINB4
+#define MOSI                           PINB2
+#define MISO                           PINB3
+#define SCK                            PINB1
+#define NATIVE_CS                      PINB0
+#else
+#define SPI_DDR                        DDRB
+#define DEVICE_CS0                     PINB2
 #define MOSI                           PINB3
 #define MISO                           PINB4
 #define SCK                            PINB5
-
+#define NATIVE_CS                      DEVICE_CS0
+#endif
 
 void spi_assert_cs(struct spi_device *inst)
 {
 	/* Hard-coded for the W5500 shield. */
-	PORTB &= ~(1u << CS);
+	PORTB &= ~(1u << DEVICE_CS0);
 }
 
 void spi_deassert_cs(struct spi_device *inst)
 {
 	/* Hard-coded for the W5500 shield. */
-	PORTB |= (1u << CS);
+	PORTB |= (1u << DEVICE_CS0);
 }
 
 size_t spi_transfer(struct spi_device *inst,
@@ -58,11 +67,16 @@ void spi_bus_init(void)
 	/* MISO is input. */
 	SPI_DDR &= ~(1u << MISO);
 
-	/* The other pins are outputs. */
-	SPI_DDR |= ((1u << MOSI) | (1u << CS) | (1u << SCK));
+	/* Set all CS high (activates a pull-up until they're configured as outputs)
+	 * and activate a pull-up on MISO.
+	 */
+	PORTB |= ((1u << NATIVE_CS) | (1u << DEVICE_CS0) | (1u << MISO));
 
-	/* Enable pullup on MISO. */
-	PORTB |= (1u << MISO);
+	/* Enable outputs.
+	 * NOTE: The native CS pin (i.e., the one used when in slave mode) must
+	 *       be set to output before enabling the SPI controller.
+	 */
+	SPI_DDR |= ((1u << MOSI) | (1u << SCK) | (1u << NATIVE_CS) | (1u << DEVICE_CS0));
 
 	/* Double the SPI rate. In the bootrom, run it slower... */
 	/* SPSR = SPI2X; */

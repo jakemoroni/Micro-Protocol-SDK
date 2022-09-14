@@ -2,7 +2,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Makefile to build the application.
 
-MCU		:= atmega328p
+# Set TARGET to either TARGET_UNO or TARGET_MEGA.
+TARGET			:= TARGET_UNO
+#TARGET			:= TARGET_MEGA
+
+ifeq ($(TARGET), TARGET_MEGA)
+	MCU			:= atmega2560
+	EEPROM_MAC_OFFSET	:= 4090
+	FIRMWARE_IMAGE_SIZE	:= 253952
+else
+	MCU			:= atmega328p
+	EEPROM_MAC_OFFSET	:= 1018
+	FIRMWARE_IMAGE_SIZE	:= 28672
+endif
+
 CROSS_COMPILE	:= avr-
 #CROSS_COMPILE	:= /home/jmoroni/Programs/avr_toolchain/bin/avr-
 
@@ -17,8 +30,10 @@ CFLAGS		+= -Os
 CFLAGS		+= -fshort-enums
 CFLAGS		+= -ffunction-sections
 CFLAGS		+= -fdata-sections
+CFLAGS		+= -DEEPROM_MAC_OFFSET=$(EEPROM_MAC_OFFSET)
+CFLAGS		+= -DFIRMWARE_IMAGE_SIZE=$(FIRMWARE_IMAGE_SIZE)
 
-LDFLAGS		+= -mmcu=$(MCU) -Wl,-gc-sections,--relax
+LDFLAGS		:= -mmcu=$(MCU) -Wl,-gc-sections,--relax
 
 ASM_SRCS	:= $(wildcard $(SRC_DIR)/*.S)
 C_SRCS		:= $(wildcard $(SRC_DIR)/*.c)
@@ -48,7 +63,7 @@ genimage: genimage.c
 	@$(CC) -o $@ $< -Wall
 
 application.update: application.bin genimage
-	@./genimage application.bin > $@
+	@./genimage $(FIRMWARE_IMAGE_SIZE) application.bin > $@
 
 $(BUILD_DIR):
 	@mkdir $@

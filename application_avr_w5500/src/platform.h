@@ -16,12 +16,6 @@
 #include <avr/boot.h>
 #include <avr/pgmspace.h>
 
-/* The MAC is always stored at the end of the EEPROM.
- * No need for signature/CRC checking since it's programmed
- * by the external programmer and verified.
- */
-#define EEPROM_MAC_OFFSET              1018u
-
 /* Spins for a number of milliseconds. */
 static inline void platform_mdelay(uint32_t millis)
 {

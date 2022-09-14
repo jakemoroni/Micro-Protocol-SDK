@@ -18,16 +18,13 @@
 #define FW_VER_MAJOR                   1
 #define FW_VER_MINOR                   1
 
-/* Fixed image size. */
-#define FIRMWARE_IMAGE_SIZE            28672u /* 32 KiB - 4 KiB bootlodaer */
-
-/* If the bootloader finds these values at address 0x100 in SRAM, then
+/* If the bootloader finds these values at address 0x200 in SRAM, then
  * it indicates that the next byte contains a reset command/cause.
  * These values are optionally set by the application before allowing
  * the WDT to reset the device. This works because the SRAM contents
  * are preserved on a WDT reset on AVRs.
  */
-#define RESET_MAGIC_SRAM_BASE          0x100
+#define RESET_MAGIC_SRAM_BASE          0x200
 #define RESET_MAGIC_SIZE               8u
 #define RESET_MAGIC_BYTES              { 0xD5, 0xF8, 0x31, 0x8C, 0xBB, 0xDD, 0xF6, 0xF7 }
 

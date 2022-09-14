@@ -12,8 +12,8 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-
-#define FIRMWARE_IMAGE_SIZE            28672u /* 32 KiB - 4 KiB bootlodaer */
+#include <errno.h>
+#include <limits.h>
 
 /* Recalculate the CRC-32 for another byte. */
 static uint32_t crc32_update_byte(uint32_t crc_in, uint8_t byte)
@@ -41,29 +41,39 @@ int main(int argc, char *argv[])
 	uint8_t *buffer;
 	ssize_t tmp;
 	size_t i;
+	char *end = NULL;
+	unsigned long firmware_image_size;
 	int ret = EXIT_SUCCESS;
 
-	if (argc != 2) {
-		fprintf(stderr, "Usage: genimage input.bin\nOutput goes to stdout\n");
+	if (argc != 3) {
+		fprintf(stderr, "Usage: genimage [size] [input.bin]\nOutput goes to stdout\n");
 		return EXIT_FAILURE;
 	}
 
-	buffer = malloc(FIRMWARE_IMAGE_SIZE);
+	errno = 0;
+	firmware_image_size = strtoul(argv[1], &end, 0);
+	if ((argv[1] == end) ||
+	    ((firmware_image_size == LONG_MAX || firmware_image_size == LONG_MIN) && errno == ERANGE)) {
+		fprintf(stderr, "Invalid image size argument\n");
+		return EXIT_FAILURE;
+	}
+
+	buffer = malloc(firmware_image_size);
 	if (!buffer) {
 		fprintf(stderr, "Could not allocate buffer\n");
 		return EXIT_FAILURE;
 	}
 
-	memset(buffer, 0xFF, FIRMWARE_IMAGE_SIZE);
+	memset(buffer, 0xFF, firmware_image_size);
 
-	file = open(argv[1], O_RDONLY);
+	file = open(argv[2], O_RDONLY);
 	if (file == -1) {
 		perror("Failed to open firmware file");
 		free(buffer);
 		return EXIT_FAILURE;
 	}
 
-	read_ret = read(file, buffer, FIRMWARE_IMAGE_SIZE);
+	read_ret = read(file, buffer, firmware_image_size);
 	if (read_ret == -1) {
 		perror("Failed to read firmware file");
 		ret = EXIT_FAILURE;
@@ -72,27 +82,27 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Update file was 0 bytes\n");
 		ret = EXIT_FAILURE;
 		goto fail;
-	} else if (read_ret > (FIRMWARE_IMAGE_SIZE - 4u)) {
+	} else if (read_ret > (firmware_image_size - 4u)) {
 		fprintf(stderr,
-			"Firmware file is too big (must be %d bytes or less)\n",
-			FIRMWARE_IMAGE_SIZE - 4u);
+			"Firmware file is too big (must be %lu bytes or less)\n",
+			firmware_image_size - 4u);
 		ret = EXIT_FAILURE;
 		goto fail;
 	}
 
 	crc = 0;
-	for (i = 0; i < (FIRMWARE_IMAGE_SIZE - 4u); i++) {
+	for (i = 0; i < (firmware_image_size - 4u); i++) {
 		crc = crc32_update_byte(crc, buffer[i]);
 	}
 
-	buffer[FIRMWARE_IMAGE_SIZE - 4u] = (crc >> 24u);
-	buffer[FIRMWARE_IMAGE_SIZE - 3u] = (crc >> 16u);
-	buffer[FIRMWARE_IMAGE_SIZE - 2u] = (crc >> 8u);
-	buffer[FIRMWARE_IMAGE_SIZE - 1u] = crc;
+	buffer[firmware_image_size - 4u] = (crc >> 24u);
+	buffer[firmware_image_size - 3u] = (crc >> 16u);
+	buffer[firmware_image_size - 2u] = (crc >> 8u);
+	buffer[firmware_image_size - 1u] = crc;
 
 	/* TODO - Should be a loop here. */
-	tmp = write(STDOUT_FILENO, buffer, FIRMWARE_IMAGE_SIZE);
-	if (tmp != FIRMWARE_IMAGE_SIZE) {
+	tmp = write(STDOUT_FILENO, buffer, firmware_image_size);
+	if (tmp != firmware_image_size) {
 		fprintf(stderr, "Failed to write all file bytes\n");
 		ret = EXIT_FAILURE;
 	}
