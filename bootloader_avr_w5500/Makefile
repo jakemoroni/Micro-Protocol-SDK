@@ -7,19 +7,19 @@ TARGET			:= TARGET_UNO
 #TARGET			:= TARGET_MEGA
 
 # Set to point to the avrdude binary. Enables use of newer binary if built manually.
-AVRDUDE_BINARY		:= avrdude
-#AVRDUDE_BINARY		:= /home/jmoroni/Programs/avrdude/bin/avrdude
+#AVRDUDE_BINARY		:= avrdude
+AVRDUDE_BINARY		:= /home/jmoroni/Programs/avrdude/bin/avrdude
 
 # Set to the type of programmer being used.
 
 # Sparkfun AVR pocket programmer
-AVRDUDE_PROGRAMMER	:= usbtiny
+#AVRDUDE_PROGRAMMER	:= usbtiny
 
 # Pololu USB AVR programmer v2 (adjust ttyACMx as necessary)
 #AVRDUDE_PROGRAMMER	:= stk500v2 -P /dev/ttyACM1
 
 # Genuine Atmel ICE
-#AVRDUDE_PROGRAMMER	:= atmelice_isp
+AVRDUDE_PROGRAMMER	:= atmelice_isp
 
 ifeq ($(TARGET), TARGET_MEGA)
 	MCU			:= atmega2560
@@ -110,20 +110,16 @@ HWADDR_EEPROM.hex: HWADDR.txt
 	@$(CROSS_COMPILE)objcopy -O ihex -I binary HWADDR_EEPROM.bin HWADDR_EEPROM.hex
 	@rm HWADDR_EEPROM.bin
 
-# Program just the EEPROM.
-# NOTE: There is a bug in avrdude that causes it to segfault after programming the EEPROM...
-.PHONY: program_eeprom
-program_eeprom: HWADDR_EEPROM.hex
-	$(info Programming EEPROM...)
-	-@$(AVRDUDE_BINARY) -c $(AVRDUDE_PROGRAMMER) -p $(AVRDUDE_MCU) -U eeprom:w:HWADDR_EEPROM.hex:i
-
 .PHONY: flash
 # Program the entire device, including the EEPROM.
-flash: bootloader.hex program_eeprom
+# NOTE: There is a bug in avrdude that causes it to segfault after programming the EEPROM...
+flash: bootloader.hex HWADDR_EEPROM.hex
 	$(info Programming fuses...)
 	@$(AVRDUDE_BINARY) -c $(AVRDUDE_PROGRAMMER) -p $(AVRDUDE_MCU) -U $(FUSE_VALUES)
 	$(info Programming flash...)
 	@$(AVRDUDE_BINARY) -c $(AVRDUDE_PROGRAMMER) -p $(AVRDUDE_MCU) -U flash:w:bootloader.hex:i
+	$(info Programming EEPROM...)
+	-@$(AVRDUDE_BINARY) -c $(AVRDUDE_PROGRAMMER) -p $(AVRDUDE_MCU) -U eeprom:w:HWADDR_EEPROM.hex:i
 
 .PHONY: clean
 clean:
