@@ -350,6 +350,53 @@ static inline char *mp_transfer_abort_reason_str(enum mp_transfer_abort_reason r
 	return ret;
 }
 
+/* Returns the string name of the platform type. */
+static inline char *mp_platform_type_str(enum mp_platform_type type)
+{
+	char * ret = "MP_PLATFORM_TYPE_UNKNOWN";
+
+	switch (type) {
+	case MP_PLATFORM_TYPE_INVALID:
+		ret = "MP_PLATFORM_TYPE_INVALID";
+		break;
+	case MP_PLATFORM_TYPE_UNO_W5500:
+		ret = "MP_PLATFORM_TYPE_UNO_W5500";
+		break;
+	case MP_PLATFORM_TYPE_MEGA_W5500:
+		ret = "MP_PLATFORM_TYPE_MEGA_W5500";
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+};
+
+/* Returns the string name of the system type. */
+static inline char *mp_system_type_str(enum mp_system_type type)
+{
+	char * ret = "MP_SYSTEM_TYPE_UNKNOWN";
+
+	switch (type) {
+	case MP_SYSTEM_TYPE_INVALID:
+		ret = "MP_SYSTEM_TYPE_INVALID";
+		break;
+	case MP_SYSTEM_TYPE_GENERAL_PURPOSE:
+		ret = "MP_SYSTEM_TYPE_GENERAL_PURPOSE";
+		break;
+	case MP_SYSTEM_TYPE_REMOTE_SENSOR:
+		ret = "MP_SYSTEM_TYPE_REMOTE_SENSOR";
+		break;
+	case MP_SYSTEM_TYPE_REMOTE_GPIO:
+		ret = "MP_SYSTEM_TYPE_REMOTE_GPIO";
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+};
+
 /* Returns true if provided a valid Micro Protocol message.
  * The message must be at least the minimum size of 64 bytes.
  */

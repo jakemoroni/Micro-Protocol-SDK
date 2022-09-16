@@ -142,12 +142,17 @@ static void mp_send_identify_notice(struct mp_app *inst,
 static void mp_message_process(struct mp_app *inst, union mp_msg *msg)
 {
 	size_t i;
+	const uint8_t bcast_mac[ETHERNET_MAC_LEN] =
+		{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 	if (msg->packet.header.msg_type == MP_MSG_TYPE_IDENTIFY_QUERY) {
-		/* Respond with a notice. */
-		mp_send_identify_notice(inst,
-					msg->packet.payload.identify_query.sequence_nr,
-					msg->packet.header.src_mac);
+		/* Respond with a notice if it's for us or broadcast. */
+		if (!memcmp(msg->packet.header.dst_mac, bcast_mac, ETHERNET_MAC_LEN) ||
+		    !memcmp(msg->packet.header.dst_mac, inst->mac, ETHERNET_MAC_LEN)) {
+			mp_send_identify_notice(inst,
+						msg->packet.payload.identify_query.sequence_nr,
+						msg->packet.header.src_mac);
+		}
 		return;
 	}
 

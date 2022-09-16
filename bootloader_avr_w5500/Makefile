@@ -7,8 +7,8 @@ TARGET			:= TARGET_UNO
 #TARGET			:= TARGET_MEGA
 
 # Set to point to the avrdude binary. Enables use of newer binary if built manually.
-#AVRDUDE_BINARY		:= avrdude
-AVRDUDE_BINARY		:= /home/jmoroni/Programs/avrdude/bin/avrdude
+AVRDUDE_BINARY		:= avrdude
+#AVRDUDE_BINARY		:= /home/jmoroni/Programs/avrdude/bin/avrdude
 
 # Set to the type of programmer being used.
 
