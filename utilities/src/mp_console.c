@@ -25,6 +25,7 @@ struct util_context {
 	int socket;
 	uint8_t host_mac[ETHERNET_MAC_LEN];
 	uint8_t target_mac[ETHERNET_MAC_LEN];
+	bool target_any;
 } util_context;
 
 /* Opens a raw Ethernet socket. Returns true on success. */
@@ -156,7 +157,9 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Invalid target MAC\n%s", usage);
 			return EXIT_FAILURE;
 		}
+		inst->target_any = false;
 	} else {
+		inst->target_any = true;
 		/* Broadcast. */
 		memset(inst->target_mac, 0xFF, ETHERNET_MAC_LEN);
 	}
@@ -177,7 +180,7 @@ int main(int argc, char *argv[])
 				continue;
 			}
 
-			if (!memcmp(inst->target_mac, rx_msg.packet.header.src_mac, ETHERNET_MAC_LEN)) {
+			if (inst->target_any || !memcmp(inst->target_mac, rx_msg.packet.header.src_mac, ETHERNET_MAC_LEN)) {
 				if (rx_msg.packet.header.msg_type == MP_MSG_TYPE_CONSOLE) {
 					write(STDOUT_FILENO,
 					      rx_msg.packet.payload.console.data,
