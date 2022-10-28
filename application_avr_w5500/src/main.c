@@ -9,10 +9,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <avr/wdt.h>
+#include <avr/interrupt.h>
 #include "platform.h"
 #include "spi.h"
 #include "w5500.h"
 #include "micro_protocol.h"
+#include "jiffies.h"
 
 /* Application firmware version. */
 #define FW_VER_MAJOR                   1
@@ -296,6 +298,10 @@ int main(void)
 	union eth_rx_msg rx_msg;
 	uint8_t ident_dst[ETHERNET_MAC_LEN];
 	int16_t ret;
+	jiffies_t stats_time;
+
+	/* Enable interrupts. */
+	sei();
 
 	/* The SPI bus driver was already initialized by the bootloader, but do it again. */
 	spi_bus_init();
@@ -334,7 +340,13 @@ int main(void)
 	/* Redirect stdout over Ethernet via MP CONSOLE messages. */
 	stdout = &stdout_stream;
 
+	jiffies_init();
+
 	/* Other init code goes here... */
+
+	printf("System initialized\n");
+
+	stats_time = jiffies();
 
 	/* Handle incoming Ethernet frames. */
 	while (1) {
@@ -352,14 +364,18 @@ int main(void)
 
 		/* Other exec code goes here... */
 
-		/* Keep dumping the stats. */
-		printf("\n");
-		printf("RX Good Frames:\t\t%"PRIu32"\n", inst->stats.rx_good_frames);
-		printf("RX Too Big Frames:\t%"PRIu32"\n", inst->stats.rx_too_big_frames);
-		printf("RX Runt Frames:\t\t%"PRIu32"\n", inst->stats.rx_runt_frames);
-		printf("RX MP Frames:\t\t%"PRIu32"\n", inst->stats.rx_mp_frames);
-		printf("RX MP Frames Ignored:\t%"PRIu32"\n", inst->stats.rx_mp_frames_ignored);
-		printf("TX Frames:\t\t%"PRIu32"\n", inst->stats.tx_frames);
-		printf("\n");
+		/* Dump the stats once per second. */
+		jiffies_t tmp_jiffies = jiffies();
+		if (tmp_jiffies - stats_time > JIFFIES_PER_SECOND) {
+			printf("\n");
+			printf("RX Good Frames:\t\t%"PRIu32"\n", inst->stats.rx_good_frames);
+			printf("RX Too Big Frames:\t%"PRIu32"\n", inst->stats.rx_too_big_frames);
+			printf("RX Runt Frames:\t\t%"PRIu32"\n", inst->stats.rx_runt_frames);
+			printf("RX MP Frames:\t\t%"PRIu32"\n", inst->stats.rx_mp_frames);
+			printf("RX MP Frames Ignored:\t%"PRIu32"\n", inst->stats.rx_mp_frames_ignored);
+			printf("TX Frames:\t\t%"PRIu32"\n", inst->stats.tx_frames);
+			printf("\n");
+			stats_time = tmp_jiffies;
+		}
 	}
 }
