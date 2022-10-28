@@ -89,4 +89,26 @@ static inline void platform_get_mac(uint8_t *buf)
 	}
 }
 
+/* Similar semantics to the Linux kernel spinlock.
+ * Since this is a simple uC, we just need to disable
+ * interrupts.
+ */
+static inline uint8_t spin_lock_irqsave(void)
+{
+	uint8_t flags;
+	asm volatile("in %0, %1\n\t"
+		     "cli\n\t"
+		     : "=r" (flags)
+		     : "I" (_SFR_IO_ADDR(SREG))
+		     : "memory");
+	__sync_synchronize(); /* Not strictly necessary due to memory clobber above. */
+	return flags;
+}
+
+static inline void spin_unlock_irqrestore(uint8_t flags)
+{
+	__sync_synchronize();
+	asm volatile("out %0, %1" :: "I" (_SFR_IO_ADDR(SREG)), "r" (flags) : "memory");
+}
+
 #endif /* PLATFORM_H_ */
